@@ -22,7 +22,7 @@ This is **mathematically equivalent** to computing the exact sample mean — but
 
 ## 🚀 Live Demo
 
-👉 **[Open the visualizer](./index.html)** — or deploy to Netlify / GitHub Pages (see [Deployment](#deployment))
+👉 **[Open the visualizer]([./index.html](https://boiakay.github.io/RL_incremental_sample-mean_update_rule/))** — or deploy to Netlify / GitHub Pages (see [Deployment](#deployment))
 
 ---
 
