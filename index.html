@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Incremental Mean Update — RL Bandit Demo</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #080b10;
+    --surface:  #0d1117;
+    --panel:    #111827;
+    --border:   #1a2234;
+    --purple:   #7c3aed;
+    --violet:   #a78bfa;
+    --mint:     #34d399;
+    --red:      #f87171;
+    --blue:     #60a5fa;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --dim:      #94a3b8;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ─── GRID BACKGROUND ─── */
+  body::before {
+    content: '';
+    position: fixed; inset: 0; z-index: 0;
+    background-image:
+      linear-gradient(rgba(124,58,237,.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(124,58,237,.04) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+  }
+
+  /* ─── GLOW ─── */
+  .glow-orb {
+    position: fixed; border-radius: 50%; filter: blur(120px);
+    pointer-events: none; z-index: 0;
+  }
+  .glow-orb.a { width:500px; height:500px; top:-150px; left:-100px; background: rgba(124,58,237,.12); }
+  .glow-orb.b { width:400px; height:400px; bottom:-100px; right:-80px; background: rgba(52,211,153,.07); }
+
+  /* ─── LAYOUT ─── */
+  .container {
+    position: relative; z-index: 1;
+    max-width: 960px; margin: 0 auto; padding: 48px 24px 80px;
+  }
+
+  /* ─── HEADER ─── */
+  header { margin-bottom: 40px; }
+  .eyebrow {
+    font-family: 'Syne', sans-serif; font-size: 11px; font-weight: 600;
+    letter-spacing: 3px; text-transform: uppercase; color: var(--violet);
+    margin-bottom: 12px; display: flex; align-items: center; gap: 10px;
+  }
+  .eyebrow::before {
+    content:''; display:inline-block; width:28px; height:1px; background:var(--violet);
+  }
+  h1 {
+    font-family: 'Syne', sans-serif; font-size: clamp(28px, 5vw, 48px);
+    font-weight: 800; line-height: 1.1; color: var(--text); margin-bottom: 14px;
+  }
+  h1 span { color: var(--violet); }
+  .subtitle { color: var(--muted); font-size: 13px; line-height: 1.7; max-width: 560px; }
+
+  /* ─── FORMULA STRIP ─── */
+  .formula-strip {
+    background: linear-gradient(135deg, #1a1040 0%, #0d1117 100%);
+    border: 1px solid rgba(124,58,237,.35);
+    border-radius: 12px; padding: 20px 28px;
+    margin: 32px 0; display: flex; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 16px;
+    box-shadow: 0 0 40px rgba(124,58,237,.08);
+  }
+  .formula-main {
+    font-size: 18px; color: var(--violet);
+    font-family: 'Space Mono', monospace;
+  }
+  .formula-main sub { font-size: 11px; }
+  .formula-note { font-size: 11px; color: var(--muted); max-width: 280px; line-height: 1.6; }
+  .formula-note strong { color: var(--mint); }
+  .badge {
+    background: rgba(52,211,153,.1); border: 1px solid rgba(52,211,153,.3);
+    color: var(--mint); font-size: 10px; font-family: 'Syne', sans-serif;
+    font-weight: 700; letter-spacing: 2px; text-transform: uppercase;
+    padding: 3px 10px; border-radius: 999px;
+  }
+
+  /* ─── DERIVATION ─── */
+  .section-label {
+    font-family: 'Syne', sans-serif; font-size: 10px; font-weight: 700;
+    letter-spacing: 3px; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .section-label::after { content:''; flex:1; height:1px; background:var(--border); }
+
+  .derivation-grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px; margin-bottom: 40px;
+  }
+  .step-card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 10px; padding: 16px 18px;
+    transition: border-color .2s, transform .2s;
+    position: relative; overflow: hidden;
+  }
+  .step-card:hover { border-color: rgba(124,58,237,.4); transform: translateY(-2px); }
+  .step-card::before {
+    content: attr(data-step); position: absolute;
+    top: 12px; right: 14px; font-family: 'Syne', sans-serif;
+    font-size: 42px; font-weight: 800; color: rgba(124,58,237,.07);
+  }
+  .step-title { font-family: 'Syne', sans-serif; font-size: 12px; font-weight: 700;
+    color: var(--violet); margin-bottom: 8px; text-transform: uppercase; letter-spacing: 1px; }
+  .step-eq { font-size: 13px; color: var(--text); margin-bottom: 6px; line-height: 1.8; }
+  .step-note { font-size: 11px; color: var(--muted); line-height: 1.6; }
+  .step-note .hl { color: var(--mint); }
+
+  /* ─── CODE ─── */
+  .code-wrap {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; overflow: hidden; margin-bottom: 40px;
+  }
+  .code-header {
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    padding: 10px 18px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .dots { display:flex; gap:6px; }
+  .dot { width:10px; height:10px; border-radius:50%; }
+  .dot.r { background:#f87171; } .dot.y { background:#fbbf24; } .dot.g { background:#34d399; }
+  .file-name { font-size: 11px; color: var(--muted); letter-spacing: 1px; }
+  .copy-btn {
+    background: transparent; border: 1px solid var(--border);
+    color: var(--muted); font-family: 'Space Mono', monospace;
+    font-size: 10px; padding: 4px 12px; border-radius: 6px;
+    cursor: pointer; transition: all .2s;
+  }
+  .copy-btn:hover { border-color: var(--violet); color: var(--violet); }
+  .copy-btn.copied { color: var(--mint); border-color: var(--mint); }
+  pre {
+    padding: 22px; font-size: 13px; line-height: 1.8;
+    overflow-x: auto; font-family: 'Space Mono', monospace;
+  }
+  .kw  { color: #ff79c6; } .fn { color: var(--mint); }
+  .cm  { color: #4a5568; font-style: italic; }
+  .st  { color: #f1fa8c; } .nb { color: var(--blue); }
+  .nm  { color: #bd93f9; } .op { color: var(--violet); }
+
+  /* ─── DEMO PANEL ─── */
+  .demo-wrap {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; overflow: hidden;
+  }
+  .demo-header {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 14px 22px; display: flex; align-items: center; gap: 12px;
+  }
+  .pulse { width:8px; height:8px; border-radius:50%; background:var(--mint);
+    animation: pulse 2s infinite; }
+  @keyframes pulse {
+    0%,100%{ box-shadow:0 0 0 0 rgba(52,211,153,.6); }
+    50%{ box-shadow:0 0 0 6px rgba(52,211,153,0); }
+  }
+  .demo-title { font-family:'Syne',sans-serif; font-size:13px; font-weight:700;
+    color:var(--text); letter-spacing:.5px; }
+  .demo-body { padding: 24px; }
+
+  /* controls */
+  .controls-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 24px; }
+  .ctrl-group { display: flex; flex-direction: column; gap: 5px; }
+  .ctrl-label { font-size: 10px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+  input[type=number], input[type=range] {
+    background: var(--surface); border: 1px solid var(--border);
+    color: var(--text); border-radius: 8px;
+    padding: 8px 14px; font-family: 'Space Mono', monospace; font-size: 13px;
+    width: 110px; transition: border-color .2s; outline: none;
+  }
+  input[type=number]:focus { border-color: var(--violet); }
+  input[type=range] { padding: 0; width: 130px; accent-color: var(--violet); cursor: pointer; }
+  .range-val { font-size: 11px; color: var(--violet); margin-top: 2px; }
+
+  .btn { border: none; border-radius: 8px; padding: 9px 18px;
+    font-family: 'Space Mono', monospace; font-size: 12px; cursor: pointer; transition: all .2s; }
+  .btn-primary { background: var(--purple); color: white; }
+  .btn-primary:hover { background: #6d28d9; transform: translateY(-1px); }
+  .btn-random { background: rgba(167,139,250,.12); color: var(--violet);
+    border: 1px solid rgba(124,58,237,.3); }
+  .btn-random:hover { background: rgba(167,139,250,.2); }
+  .btn-burst { background: rgba(52,211,153,.1); color: var(--mint);
+    border: 1px solid rgba(52,211,153,.3); }
+  .btn-burst:hover { background: rgba(52,211,153,.18); }
+  .btn-reset { background: transparent; color: var(--muted);
+    border: 1px solid var(--border); }
+  .btn-reset:hover { border-color: var(--red); color: var(--red); }
+
+  /* stats */
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 14px 16px; text-align: center; transition: border-color .3s;
+  }
+  .stat-card.active { border-color: rgba(124,58,237,.4); }
+  .stat-val { font-family:'Syne',sans-serif; font-size: 22px; font-weight: 800;
+    color: var(--violet); line-height: 1; margin-bottom: 5px; }
+  .stat-lbl { font-size: 10px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; }
+
+  /* chart */
+  .chart-area { position: relative; height: 180px; margin-bottom: 22px; }
+  canvas { width:100% !important; height: 100% !important; display: block; border-radius: 8px; }
+
+  /* table */
+  .table-scroll { max-height: 280px; overflow-y: auto; border-radius: 8px;
+    border: 1px solid var(--border); }
+  .table-scroll::-webkit-scrollbar { width: 5px; }
+  .table-scroll::-webkit-scrollbar-track { background: transparent; }
+  .table-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead { position: sticky; top: 0; z-index: 1; }
+  th { background: var(--surface); color: var(--muted); font-weight: 400;
+    text-align: left; padding: 9px 14px; letter-spacing: 1px; font-size: 10px;
+    text-transform: uppercase; border-bottom: 1px solid var(--border); }
+  td { padding: 8px 14px; border-bottom: 1px solid rgba(26,34,52,.6); }
+  tr:hover td { background: rgba(124,58,237,.04); }
+  .c-step { color: var(--muted); }
+  .c-r { color: var(--mint); }
+  .c-err-pos { color: #60a5fa; }
+  .c-err-neg { color: var(--red); }
+  .c-alpha { color: #fbbf24; }
+  .c-q { color: var(--violet); font-weight: bold; }
+
+  /* animation */
+  @keyframes slideIn {
+    from { opacity:0; transform:translateY(-6px); }
+    to   { opacity:1; transform:translateY(0); }
+  }
+  .new-row { animation: slideIn .3s ease; }
+
+  /* ─── FOOTER ─── */
+  footer {
+    margin-top: 60px; padding-top: 24px;
+    border-top: 1px solid var(--border);
+    display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px;
+    font-size: 11px; color: var(--muted);
+  }
+  footer a { color: var(--violet); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div class="glow-orb a"></div>
+<div class="glow-orb b"></div>
+
+<div class="container">
+
+  <!-- HEADER -->
+  <header>
+    <div class="eyebrow">Reinforcement Learning · Bandit Algorithms</div>
+    <h1>Incremental <span>Mean Update</span></h1>
+    <p class="subtitle">
+      The elegant recurrence that underpins every sample-average value estimator
+      in RL — from k-armed bandits to Q-learning.
+      Derived from Sutton &amp; Barto, <em>Reinforcement Learning</em>, Ch. 2.
+    </p>
+  </header>
+
+  <!-- FORMULA STRIP -->
+  <div class="formula-strip">
+    <div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:1px">INCREMENTAL UPDATE RULE</div>
+      <div class="formula-main">
+        Q<sub>n+1</sub> = Q<sub>n</sub> &nbsp;+&nbsp; <span style="color:var(--mint)">(1/n)</span>
+        &nbsp;·&nbsp; [R<sub>n</sub> − Q<sub>n</sub>]
+      </div>
+    </div>
+    <div class="formula-note">
+      <strong>error</strong> = R<sub>n</sub> − Q<sub>n</sub> &nbsp;(prediction error)<br>
+      <strong>α = 1/n</strong> &nbsp;→ shrinks with experience<br>
+      Equivalent to exact mean — zero extra memory.
+    </div>
+    <span class="badge">O(1) Memory</span>
+  </div>
+
+  <!-- DERIVATION -->
+  <div class="section-label">Step-by-step derivation</div>
+  <div class="derivation-grid">
+    <div class="step-card" data-step="1">
+      <div class="step-title">Start with exact mean</div>
+      <div class="step-eq">Q<sub>n+1</sub> = (1/n) Σ<sup>n</sup><sub>i=1</sub> R<sub>i</sub></div>
+      <div class="step-note">Definition: average of all n rewards seen so far.</div>
+    </div>
+    <div class="step-card" data-step="2">
+      <div class="step-title">Peel off latest reward</div>
+      <div class="step-eq">= (1/n) · (R<sub>n</sub> + Σ<sup>n−1</sup><sub>i=1</sub> R<sub>i</sub>)</div>
+      <div class="step-note">Separate the newest reward from the historical sum.</div>
+    </div>
+    <div class="step-card" data-step="3">
+      <div class="step-title">Recognise Q<sub>n</sub> <span class="hl">(the circle!)</span></div>
+      <div class="step-eq">= (1/n) · (R<sub>n</sub> + (n−1) · <span class="hl">Q<sub>n</sub></span>)</div>
+      <div class="step-note">The sum over (n−1) terms equals <span class="hl">(n−1)·Q<sub>n</sub></span> by definition.</div>
+    </div>
+    <div class="step-card" data-step="4">
+      <div class="step-title">Expand &amp; collect</div>
+      <div class="step-eq">= (1/n)(R<sub>n</sub> + nQ<sub>n</sub> − Q<sub>n</sub>)</div>
+      <div class="step-note">Distribute (n−1) = n − 1 into the bracket.</div>
+    </div>
+    <div class="step-card" data-step="5">
+      <div class="step-title">Final form ✓</div>
+      <div class="step-eq" style="color:var(--violet)">Q<sub>n+1</sub> = Q<sub>n</sub> + (1/n)[R<sub>n</sub> − Q<sub>n</sub>]</div>
+      <div class="step-note">Classic <em>NewEstimate ← OldEstimate + α·Error</em> structure.</div>
+    </div>
+    <div class="step-card" data-step="6">
+      <div class="step-title">Non-stationary variant</div>
+      <div class="step-eq" style="color:var(--mint)">Q<sub>n+1</sub> = Q<sub>n</sub> + <span>α</span>[R<sub>n</sub> − Q<sub>n</sub>]</div>
+      <div class="step-note">Fix α ∈ (0,1] to weight recent rewards exponentially more.</div>
+    </div>
+  </div>
+
+  <!-- CODE -->
+  <div class="section-label">Python implementation</div>
+  <div class="code-wrap">
+    <div class="code-header">
+      <div class="dots"><div class="dot r"></div><div class="dot y"></div><div class="dot g"></div></div>
+      <span class="file-name">incremental_mean.py</span>
+      <button class="copy-btn" id="copyBtn" onclick="copyCode()">copy</button>
+    </div>
+    <pre id="codeBlock"><span class="cm"># ── Incremental Mean Update — Sutton & Barto Ch.2 ──────────────────────</span>
+
+<span class="kw">class</span> <span class="fn">IncrementalMean</span>:
+    <span class="cm">"""Sample-average action value estimator (O(1) memory)."""</span>
+    <span class="kw">def</span> <span class="fn">__init__</span>(<span class="nb">self</span>, Q0=<span class="nm">0.0</span>):
+        <span class="nb">self</span>.Q = Q0   <span class="cm"># current estimate  →  Q_n</span>
+        <span class="nb">self</span>.n = <span class="nm">0</span>    <span class="cm"># step counter</span>
+
+    <span class="kw">def</span> <span class="fn">update</span>(<span class="nb">self</span>, R):
+        <span class="cm">"""Feed one reward; returns (new_Q, error, alpha)."""</span>
+        <span class="nb">self</span>.n <span class="op">+=</span> <span class="nm">1</span>
+        alpha  <span class="op">=</span> <span class="nm">1.0</span> <span class="op">/</span> <span class="nb">self</span>.n             <span class="cm"># step-size α = 1/n</span>
+        error  <span class="op">=</span> R <span class="op">-</span> <span class="nb">self</span>.Q               <span class="cm"># prediction error δ</span>
+        <span class="nb">self</span>.Q <span class="op">+=</span> alpha <span class="op">*</span> error            <span class="cm"># Q ← Q + α·δ</span>
+        <span class="kw">return</span> <span class="nb">self</span>.Q, error, alpha
+
+
+<span class="kw">class</span> <span class="fn">IncrementalMeanConstantAlpha</span>:
+    <span class="cm">"""Non-stationary variant: fixed α weights recent rewards more."""</span>
+    <span class="kw">def</span> <span class="fn">__init__</span>(<span class="nb">self</span>, alpha=<span class="nm">0.1</span>, Q0=<span class="nm">0.0</span>):
+        <span class="nb">self</span>.Q     = Q0
+        <span class="nb">self</span>.alpha = alpha
+        <span class="nb">self</span>.n     = <span class="nm">0</span>
+
+    <span class="kw">def</span> <span class="fn">update</span>(<span class="nb">self</span>, R):
+        <span class="nb">self</span>.n <span class="op">+=</span> <span class="nm">1</span>
+        error  <span class="op">=</span> R <span class="op">-</span> <span class="nb">self</span>.Q
+        <span class="nb">self</span>.Q <span class="op">+=</span> <span class="nb">self</span>.alpha <span class="op">*</span> error
+        <span class="kw">return</span> <span class="nb">self</span>.Q, error, <span class="nb">self</span>.alpha
+
+
+<span class="cm"># ── Demo ────────────────────────────────────────────────────────────────</span>
+<span class="kw">if</span> __name__ <span class="op">==</span> <span class="st">"__main__"</span>:
+    rewards = [<span class="nm">4</span>, <span class="nm">2</span>, <span class="nm">7</span>, <span class="nm">1</span>, <span class="nm">5</span>, <span class="nm">3</span>, <span class="nm">8</span>, <span class="nm">6</span>]
+    tracker = <span class="fn">IncrementalMean</span>()
+
+    <span class="fn">print</span>(<span class="st">f"{'Step':>5} {'Reward':>8} {'Error':>10} {'Alpha':>8} {'Q_est':>12}"</span>)
+    <span class="fn">print</span>(<span class="st">"-"</span> <span class="op">*</span> <span class="nm">48</span>)
+    <span class="kw">for</span> R <span class="kw">in</span> rewards:
+        Q_new, err, alpha = tracker.<span class="fn">update</span>(R)
+        <span class="fn">print</span>(<span class="st">f"{tracker.n:>5} {R:>8.2f} {err:>+10.4f} {alpha:>8.4f} {Q_new:>12.6f}"</span>)</pre>
+  </div>
+
+  <!-- LIVE DEMO -->
+  <div class="section-label">Live interactive demo</div>
+  <div class="demo-wrap">
+    <div class="demo-header">
+      <div class="pulse"></div>
+      <div class="demo-title">🎰 k-Armed Bandit Value Estimator</div>
+    </div>
+    <div class="demo-body">
+
+      <!-- Controls -->
+      <div class="controls-row">
+        <div class="ctrl-group">
+          <div class="ctrl-label">Reward R<sub>n</sub></div>
+          <input type="number" id="rewardIn" value="5.0" step="0.1">
+        </div>
+        <div class="ctrl-group">
+          <div class="ctrl-label">Burst count</div>
+          <input type="number" id="burstIn" value="10" min="1" max="200" step="1">
+        </div>
+        <div class="ctrl-group">
+          <div class="ctrl-label">Rand range [0 – <span id="maxLbl">10</span>]</div>
+          <input type="range" id="maxRange" min="1" max="50" value="10"
+            oninput="document.getElementById('maxLbl').textContent=this.value">
+        </div>
+        <button class="btn btn-primary" onclick="step()">Feed Reward →</button>
+        <button class="btn btn-random" onclick="stepRandom()">🎲 Random</button>
+        <button class="btn btn-burst" onclick="burst()">⚡ Burst</button>
+        <button class="btn btn-reset" onclick="resetAll()">↺ Reset</button>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-row">
+        <div class="stat-card" id="sc-n">
+          <div class="stat-val" id="sv-n">0</div>
+          <div class="stat-lbl">Steps (n)</div>
+        </div>
+        <div class="stat-card" id="sc-q">
+          <div class="stat-val" id="sv-q">0.0000</div>
+          <div class="stat-lbl">Q estimate</div>
+        </div>
+        <div class="stat-card" id="sc-true">
+          <div class="stat-val" id="sv-true">—</div>
+          <div class="stat-lbl">True mean</div>
+        </div>
+        <div class="stat-card" id="sc-err">
+          <div class="stat-val" id="sv-err">—</div>
+          <div class="stat-lbl">|Q − mean|</div>
+        </div>
+      </div>
+
+      <!-- Chart -->
+      <div class="chart-area">
+        <canvas id="chartCanvas"></canvas>
+      </div>
+
+      <!-- Table -->
+      <div class="table-scroll" id="tableScroll">
+        <table>
+          <thead><tr>
+            <th>n</th><th>Reward Rₙ</th><th>Error δ</th><th>α = 1/n</th><th>Q estimate</th>
+          </tr></thead>
+          <tbody id="logBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <footer>
+    <span>Incremental Mean Update &nbsp;·&nbsp; Sutton &amp; Barto, RL 2nd Ed., §2.4</span>
+    <span>BITS Pilani WILP · Deep RL (AIMLZG512)</span>
+  </footer>
+
+</div>
+
+<script>
+  // ── State ──────────────────────────────────────────────────────────────
+  let Q = 0, n = 0, rewards = [], Qs = [], trueMeans = [];
+
+  // ── Core formula ───────────────────────────────────────────────────────
+  function updateQ(R) {
+    n++;
+    const error = R - Q;
+    const alpha  = 1 / n;
+    Q += alpha * error;
+    rewards.push(R);
+    Qs.push(Q);
+    const tm = rewards.reduce((a,b)=>a+b,0)/rewards.length;
+    trueMeans.push(tm);
+    addRow(n, R, error, alpha, Q);
+    updateStats(tm);
+    drawChart();
+  }
+
+  function step() {
+    const R = parseFloat(document.getElementById('rewardIn').value);
+    if (!isNaN(R)) updateQ(R);
+  }
+
+  function stepRandom() {
+    const max = parseFloat(document.getElementById('maxRange').value);
+    updateQ(parseFloat((Math.random()*max).toFixed(2)));
+  }
+
+  function burst() {
+    const k = Math.min(parseInt(document.getElementById('burstIn').value)||10, 200);
+    const max = parseFloat(document.getElementById('maxRange').value);
+    for(let i=0;i<k;i++) updateQ(parseFloat((Math.random()*max).toFixed(2)));
+  }
+
+  function resetAll() {
+    Q=0; n=0; rewards=[]; Qs=[]; trueMeans=[];
+    document.getElementById('logBody').innerHTML='';
+    ['sv-n','sv-q','sv-true','sv-err'].forEach(id=>{
+      document.getElementById(id).textContent = id==='sv-n'?'0':'—';
+    });
+    drawChart();
+  }
+
+  // ── Table row ──────────────────────────────────────────────────────────
+  function addRow(step, R, error, alpha, Qnew) {
+    const body = document.getElementById('logBody');
+    const errCls = error >= 0 ? 'c-err-pos' : 'c-err-neg';
+    const row = document.createElement('tr');
+    row.className = 'new-row';
+    row.innerHTML = `
+      <td class="c-step">${step}</td>
+      <td class="c-r">${R.toFixed(2)}</td>
+      <td class="${errCls}">${error>=0?'+':''}${error.toFixed(4)}</td>
+      <td class="c-alpha">${alpha.toFixed(4)}</td>
+      <td class="c-q">${Qnew.toFixed(6)}</td>
+    `;
+    body.prepend(row);
+  }
+
+  // ── Stats ──────────────────────────────────────────────────────────────
+  function updateStats(tm) {
+    document.getElementById('sv-n').textContent = n;
+    document.getElementById('sv-q').textContent = Q.toFixed(4);
+    document.getElementById('sv-true').textContent = tm.toFixed(4);
+    document.getElementById('sv-err').textContent = Math.abs(Q-tm).toFixed(6);
+    document.getElementById('sc-q').classList.add('active');
+    setTimeout(()=>document.getElementById('sc-q').classList.remove('active'),400);
+  }
+
+  // ── Chart ──────────────────────────────────────────────────────────────
+  function drawChart() {
+    const canvas = document.getElementById('chartCanvas');
+    const area   = canvas.parentElement;
+    canvas.width  = area.clientWidth  * devicePixelRatio;
+    canvas.height = area.clientHeight * devicePixelRatio;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    const W = area.clientWidth, H = area.clientHeight;
+    ctx.clearRect(0,0,W,H);
+
+    if (Qs.length < 1) {
+      ctx.fillStyle = '#1a2234'; ctx.fillRect(0,0,W,H);
+      ctx.fillStyle = '#2d3748'; ctx.font='12px Space Mono';
+      ctx.textAlign='center'; ctx.fillText('Feed rewards to see the chart',W/2,H/2);
+      return;
+    }
+
+    const all = [...rewards,...Qs,...trueMeans];
+    let minV=Math.min(...all), maxV=Math.max(...all);
+    const range = maxV-minV || 1;
+    minV -= range*.08; maxV += range*.08;
+
+    const pad = {t:18,r:16,b:30,l:48};
+    const cw = W-pad.l-pad.r, ch = H-pad.t-pad.b;
+    const xp = i => pad.l + (i/(Math.max(Qs.length-1,1)))*cw;
+    const yp = v => pad.t + ch - ((v-minV)/(maxV-minV))*ch;
+
+    // Background
+    ctx.fillStyle='#0d1117'; ctx.fillRect(0,0,W,H);
+
+    // Grid
+    ctx.strokeStyle='rgba(26,34,52,0.8)'; ctx.lineWidth=1;
+    for(let k=0;k<=4;k++){
+      const y=pad.t+(k/4)*ch;
+      ctx.beginPath(); ctx.moveTo(pad.l,y); ctx.lineTo(pad.l+cw,y); ctx.stroke();
+      ctx.fillStyle='#4a5568'; ctx.font=`10px Space Mono`; ctx.textAlign='right';
+      ctx.fillText((minV+(maxV-minV)*(1-k/4)).toFixed(1), pad.l-5, y+4);
+    }
+
+    // True mean line
+    if(trueMeans.length>1){
+      ctx.beginPath(); ctx.strokeStyle='rgba(96,165,250,.35)'; ctx.lineWidth=1.5;
+      ctx.setLineDash([5,5]);
+      trueMeans.forEach((v,i)=>i===0?ctx.moveTo(xp(i),yp(v)):ctx.lineTo(xp(i),yp(v)));
+      ctx.stroke(); ctx.setLineDash([]);
+    }
+
+    // Reward dots
+    rewards.forEach((r,i)=>{
+      ctx.beginPath(); ctx.arc(xp(i),yp(r),3,0,Math.PI*2);
+      ctx.fillStyle='rgba(52,211,153,.6)'; ctx.fill();
+    });
+
+    // Q estimate line
+    if(Qs.length>1){
+      const grad=ctx.createLinearGradient(pad.l,0,pad.l+cw,0);
+      grad.addColorStop(0,'#7c3aed'); grad.addColorStop(1,'#a78bfa');
+      ctx.beginPath(); ctx.strokeStyle=grad; ctx.lineWidth=2.5;
+      Qs.forEach((v,i)=>i===0?ctx.moveTo(xp(i),yp(v)):ctx.lineTo(xp(i),yp(v)));
+      ctx.stroke();
+
+      // Latest point
+      const lx=xp(Qs.length-1), ly=yp(Qs[Qs.length-1]);
+      ctx.beginPath(); ctx.arc(lx,ly,5,0,Math.PI*2);
+      ctx.fillStyle='#a78bfa'; ctx.fill();
+    }
+
+    // Legend
+    const items=[
+      {c:'rgba(52,211,153,.7)', l:'Reward Rₙ'},
+      {c:'#a78bfa', l:'Q estimate'},
+      {c:'rgba(96,165,250,.5)', l:'True mean', dash:true}
+    ];
+    ctx.textAlign='left';
+    items.forEach((it,i)=>{
+      const lx=pad.l+i*130, ly=H-6;
+      if(it.dash){ctx.setLineDash([4,3]);ctx.strokeStyle=it.c;ctx.lineWidth=1.5;
+        ctx.beginPath();ctx.moveTo(lx,ly-3);ctx.lineTo(lx+14,ly-3);ctx.stroke();ctx.setLineDash([]);}
+      else{ctx.fillStyle=it.c;ctx.fillRect(lx,ly-9,12,7);}
+      ctx.fillStyle='#64748b'; ctx.font='10px Space Mono';
+      ctx.fillText(it.l, lx+17, ly);
+    });
+  }
+
+  // ── Copy code ──────────────────────────────────────────────────────────
+  function copyCode() {
+    const code = `# Incremental Mean Update — Sutton & Barto Ch.2
+
+class IncrementalMean:
+    """Sample-average action value estimator (O(1) memory)."""
+    def __init__(self, Q0=0.0):
+        self.Q = Q0
+        self.n = 0
+
+    def update(self, R):
+        self.n += 1
+        alpha  = 1.0 / self.n
+        error  = R - self.Q
+        self.Q += alpha * error
+        return self.Q, error, alpha
+
+
+class IncrementalMeanConstantAlpha:
+    """Non-stationary variant: fixed alpha weights recent rewards more."""
+    def __init__(self, alpha=0.1, Q0=0.0):
+        self.Q     = Q0
+        self.alpha = alpha
+        self.n     = 0
+
+    def update(self, R):
+        self.n += 1
+        error  = R - self.Q
+        self.Q += self.alpha * error
+        return self.Q, error, self.alpha
+
+
+if __name__ == "__main__":
+    rewards = [4, 2, 7, 1, 5, 3, 8, 6]
+    tracker = IncrementalMean()
+
+    print(f"{'Step':>5} {'Reward':>8} {'Error':>10} {'Alpha':>8} {'Q_est':>12}")
+    print("-" * 48)
+    for R in rewards:
+        Q_new, err, alpha = tracker.update(R)
+        print(f"{tracker.n:>5} {R:>8.2f} {err:>+10.4f} {alpha:>8.4f} {Q_new:>12.6f}")`;
+    navigator.clipboard.writeText(code);
+    const btn=document.getElementById('copyBtn');
+    btn.textContent='copied!'; btn.classList.add('copied');
+    setTimeout(()=>{btn.textContent='copy';btn.classList.remove('copied');},2000);
+  }
+
+  // ── Init ───────────────────────────────────────────────────────────────
+  window.addEventListener('resize', drawChart);
+  drawChart();
+</script>
+</body>
+</html>
